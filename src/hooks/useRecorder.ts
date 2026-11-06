@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buzz, getAudioContext, pickMimeType, restartAudioContext, setAudioSession } from "@/lib/audio";
+import {
+  buzz,
+  getAudioContext,
+  markAudioContextStale,
+  pickMimeType,
+  restartAudioContext,
+  setAudioSession,
+} from "@/lib/audio";
 
 export type RecStatus = "idle" | "requesting" | "recording" | "processing";
 
@@ -104,7 +111,11 @@ export function useRecorder() {
         timerRef.current = window.setInterval(() => {
           const seconds = (performance.now() - startedAt) / 1000;
           setElapsed(seconds);
-          if (seconds >= MAX_SECONDS && recorder.state === "recording") recorder.stop();
+          if (seconds >= MAX_SECONDS && recorder.state === "recording") {
+            // Zeitlimit: kein Tipp → Context kann hier nicht neu starten, das passiert beim nächsten Tipp.
+            markAudioContextStale();
+            recorder.stop();
+          }
         }, 100);
 
         setAnalyser(micAnalyser);

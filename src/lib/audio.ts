@@ -6,13 +6,23 @@
 let sharedContext: AudioContext | null = null;
 let output: { input: GainNode; boost: GainNode; analyser: AnalyserNode } | null = null;
 let loud = true;
+let stale = false;
 
 /** Verstärkung im „Extra laut“-Modus – der Limiter danach verhindert Übersteuern. */
 export const LOUD_BOOST = 2.2;
 
 /** Ein gemeinsamer AudioContext für die ganze App (im Klick-Handler aufrufen, wegen Autoplay-Regeln). */
 export async function getAudioContext(): Promise<AudioContext> {
+  // Aufnahme endete ohne Tipp (Zeitlimit)? Dann jetzt – beim nächsten Tipp – neu starten.
+  // Nur mit Nutzergeste, sonst startet iOS den neuen Context stumm.
+  if (stale && sharedContext && navigator.userActivation?.isActive) {
+    const old = sharedContext;
+    sharedContext = null;
+    output = null;
+    void old.close().catch(() => {});
+  }
   if (!sharedContext) {
+    stale = false;
     const Ctor =
       window.AudioContext ??
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -29,11 +39,17 @@ export async function getAudioContext(): Promise<AudioContext> {
  * über den Lautsprecher (Freisprechen).
  */
 export function restartAudioContext() {
+  stale = false;
   const old = sharedContext;
   sharedContext = null;
   output = null;
   void old?.close().catch(() => {});
   void getAudioContext().catch(() => {});
+}
+
+/** Aufnahme wurde ohne Tipp beendet: Context beim nächsten Tipp neu starten (siehe getAudioContext). */
+export function markAudioContextStale() {
+  stale = true;
 }
 
 /** Limiter: macht laut, ohne dass es kratzt. */
