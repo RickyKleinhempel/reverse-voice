@@ -1,18 +1,20 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState } from "react";
 import type { Player } from "@/hooks/usePlayer";
 import { MAX_SECONDS, type Recorder } from "@/hooks/useRecorder";
-import { audioBufferToWav, formatTime } from "@/lib/audio";
-import { EFFECTS, type EffectId, renderWithEffect } from "@/lib/effects";
+import { formatTime, isLoud, setLoud } from "@/lib/audio";
+import { EFFECTS, type EffectId } from "@/lib/effects";
+import { Portal } from "./Portal";
 import { RecordButton } from "./RecordButton";
+import type { Clip } from "./ReverseStudio";
+import { ShareSheet } from "./ShareSheet";
 import { glassButton, primaryButton, Section, Toggle } from "./ui";
 import { Waveform } from "./Waveform";
-import type { Clip } from "./ReverseStudio";
 
 const VIVID = ["#f472b6", "#c084fc", "#22d3ee"] as const;
 const MUTED = ["rgba(255,255,255,0.32)"] as const;
-const RANDOM_RATES = [0.6, 0.75, 1, 1.25, 1.5, 1.8];
+const RANDOM_RATES = [0.6, 0.75, 1, 1, 1.25, 1.5, 1.8];
 
 const IDEAS = [
   "Pizza mit Ananas",
@@ -29,35 +31,8 @@ const IDEAS = [
   "Sing eine Zeile aus deinem Lieblingssong 🎶",
 ];
 
-// Kann der Browser Dateien teilen (z. B. an WhatsApp)? Einmal prüfen und merken.
-let shareSupport: boolean | null = null;
-function getShareSupport(): boolean {
-  if (shareSupport === null) {
-    try {
-      shareSupport =
-        typeof navigator.canShare === "function" &&
-        navigator.canShare({ files: [new File([new Blob()], "test.wav", { type: "audio/wav" })] });
-    } catch {
-      shareSupport = false;
-    }
-  }
-  return shareSupport;
-}
-const subscribeNothing = () => () => {};
-
 function randomItem<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)];
-}
-
-function downloadBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function rateLabel(rate: number) {
@@ -82,9 +57,9 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
   const [effect, setEffect] = useState<EffectId>("none");
   const [rate, setRate] = useState(1);
   const [loop, setLoop] = useState(false);
+  const [loud, setLoudState] = useState(isLoud);
   const [ideaIndex, setIdeaIndex] = useState(0);
-  const [exporting, setExporting] = useState<"save" | "share" | null>(null);
-  const canShare = useSyncExternalStore(subscribeNothing, getShareSupport, () => false);
+  const [sharing, setSharing] = useState(false);
 
   const reverseHead = useRef<HTMLDivElement>(null);
   const forwardHead = useRef<HTMLDivElement>(null);
@@ -130,12 +105,12 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
 
   const chooseEffect = (next: EffectId) => {
     setEffect(next);
-    if (playingDir) playClip(playingDir, { effect: next });
+    // Effekt sofort hörbar machen
+    playClip(playingDir ?? "reverse", { effect: next });
   };
 
   const randomize = () => {
-    const others = EFFECTS.filter((fx) => fx.id !== effect);
-    const nextEffect = randomItem(others).id;
+    const nextEffect = randomItem(EFFECTS.filter((fx) => fx.id !== effect && fx.id !== "none")).id;
     const nextRate = randomItem(RANDOM_RATES);
     setEffect(nextEffect);
     setRate(nextRate);
@@ -152,31 +127,14 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
     player.setLoop(value);
   };
 
-  const exportClip = async (mode: "save" | "share") => {
-    if (!clip) return;
-    setExporting(mode);
-    try {
-      const rendered = await renderWithEffect(clip.reversed, effect, rate);
-      const blob = audioBufferToWav(rendered);
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-      const name = `rueckwaerts-${effect}-${stamp}.wav`;
+  const changeLoud = (value: boolean) => {
+    setLoudState(value);
+    setLoud(value);
+  };
 
-      if (mode === "share") {
-        try {
-          await navigator.share({
-            files: [new File([blob], name, { type: "audio/wav" })],
-            title: "Mein Rückwärts-Clip 🔁",
-            text: "Na, verstehst du, was ich sage? 😏",
-          });
-        } catch (err) {
-          if (!(err instanceof DOMException && err.name === "AbortError")) downloadBlob(blob, name);
-        }
-      } else {
-        downloadBlob(blob, name);
-      }
-    } finally {
-      setExporting(null);
-    }
+  const openShare = () => {
+    player.stop();
+    setSharing(true);
   };
 
   let status = "Tipp auf den Knopf & leg los!";
@@ -197,7 +155,9 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
         />
         <div className="-mt-4 text-center" aria-live="polite">
           <p className="font-mono text-4xl font-semibold tabular-nums">
-            {isRecording && <span className="mr-2 inline-block size-3 animate-pulse rounded-full bg-rose-500 align-middle" />}
+            {isRecording && (
+              <span className="mr-2 inline-block size-3 animate-pulse rounded-full bg-rose-500 align-middle" />
+            )}
             {formatTime(isRecording ? recorder.elapsed : (clip?.original.duration ?? 0))}
           </p>
           <p className="mt-1 text-sm text-white/60">{status}</p>
@@ -210,11 +170,8 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
           <p className="mt-1 font-display text-xl font-bold">„{IDEAS[ideaIndex]}“</p>
           <button
             type="button"
-            onClick={() => {
-              const others = IDEAS.map((_, i) => i).filter((i) => i !== ideaIndex);
-              setIdeaIndex(randomItem(others));
-            }}
-            className="mt-3 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold transition hover:bg-white/20"
+            onClick={() => setIdeaIndex(randomItem(IDEAS.map((_, i) => i).filter((i) => i !== ideaIndex)))}
+            className="mt-3 rounded-full bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/20"
           >
             🎲 Andere Idee
           </button>
@@ -237,7 +194,10 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
             </button>
           </div>
 
-          <Section title="Effekt">
+          <Section
+            title="🎭 Stimmverzerrer"
+            aside={<span className="whitespace-nowrap text-xs text-white/40">tippen = hören</span>}
+          >
             <div className="grid grid-cols-4 gap-2">
               {EFFECTS.map((fx) => {
                 const selected = fx.id === effect;
@@ -248,7 +208,7 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
                     onClick={() => chooseEffect(fx.id)}
                     disabled={locked}
                     aria-pressed={selected}
-                    className={`flex flex-col items-center gap-1 rounded-2xl px-1 py-3 text-[11px] font-bold ring-1 transition active:scale-95 disabled:opacity-50 sm:text-xs ${
+                    className={`flex min-h-[4.25rem] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2.5 text-[11px] font-bold ring-1 transition active:scale-90 disabled:opacity-50 sm:text-xs ${
                       selected
                         ? "bg-linear-to-br from-fuchsia-500/35 to-cyan-400/20 ring-fuchsia-400/80 shadow-[0_0_24px_-6px_rgba(232,121,249,0.9)]"
                         : "bg-white/[0.04] ring-white/10 hover:bg-white/10"
@@ -263,7 +223,7 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
                 type="button"
                 onClick={randomize}
                 disabled={locked}
-                className="flex flex-col items-center gap-1 rounded-2xl bg-linear-to-br from-amber-400/25 to-pink-500/25 px-1 py-3 text-[11px] font-bold ring-1 ring-amber-300/40 transition hover:brightness-125 active:scale-95 disabled:opacity-50 sm:text-xs"
+                className="flex min-h-[4.25rem] flex-col items-center justify-center gap-1 rounded-2xl bg-linear-to-br from-amber-400/25 to-pink-500/25 px-1 py-2.5 text-[11px] font-bold ring-1 ring-amber-300/40 transition hover:brightness-125 active:scale-90 disabled:opacity-50 sm:text-xs"
               >
                 <span className="text-2xl leading-none">🎲</span>
                 Zufall
@@ -272,9 +232,9 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
           </Section>
 
           <Section
-            title="Tempo & Stimmhöhe"
+            title="⚡ Tempo"
             aside={
-              <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs font-semibold tabular-nums">
+              <span className="whitespace-nowrap rounded-full bg-white/10 px-3 py-1 font-mono text-xs font-semibold tabular-nums">
                 {rateLabel(rate)} · {rate.toFixed(2)}×
               </span>
             }
@@ -295,7 +255,7 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
               <button
                 type="button"
                 onClick={() => changeRate(1)}
-                className="rounded-full px-2 py-0.5 font-semibold transition hover:bg-white/10 hover:text-white"
+                className="rounded-full px-3 py-1.5 font-semibold transition hover:bg-white/10 hover:text-white"
               >
                 ↺ Normal
               </button>
@@ -303,38 +263,72 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
             </div>
           </Section>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-2">
+            <Toggle checked={loud} onChange={changeLoud} disabled={locked}>
+              <span className="block">📢 Extra laut</span>
+              <span className="block text-xs font-normal text-white/50">
+                Kräftig über den Handy-Lautsprecher – auch zum Freisprechen
+              </span>
+            </Toggle>
             <Toggle checked={loop} onChange={changeLoop} disabled={locked}>
-              🔁 Endlos
+              <span className="block">🔁 Endlosschleife</span>
+              <span className="block text-xs font-normal text-white/50">Clip läuft immer wieder</span>
             </Toggle>
             <Toggle checked={trim} onChange={onTrimChange} disabled={locked}>
-              ✂️ Stille weg
+              <span className="block">✂️ Stille wegschneiden</span>
+              <span className="block text-xs font-normal text-white/50">Pausen am Anfang & Ende entfernen</span>
             </Toggle>
           </div>
 
-          <div className={`grid gap-3 ${canShare ? "grid-cols-2" : "grid-cols-1"}`}>
-            <button
-              type="button"
-              onClick={() => exportClip("save")}
-              disabled={locked || exporting !== null}
-              className={glassButton}
-            >
-              {exporting === "save" ? "⏳ Moment …" : "💾 Speichern"}
-            </button>
-            {canShare && (
-              <button
-                type="button"
-                onClick={() => exportClip("share")}
-                disabled={locked || exporting !== null}
-                className={glassButton}
-              >
-                {exporting === "share" ? "⏳ Moment …" : "📤 Teilen"}
-              </button>
-            )}
-          </div>
+          <button type="button" onClick={openShare} disabled={locked} className={`${primaryButton} text-lg`}>
+            📤 Teilen & Speichern
+          </button>
           <p className="-mt-3 text-center text-xs text-white/40">
-            Gespeichert wird die Rückwärts-Version mit Effekt & Tempo als WAV.
+            Als MP3, WAV oder Video – für WhatsApp, TikTok, Insta & Co.
           </p>
+
+          {/* App-artige Leiste unten am Handy */}
+          {active && !sharing && (
+            <Portal>
+              <div className="fixed inset-x-0 bottom-0 z-30 animate-fade-in px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:hidden">
+                <div className="flex items-center gap-2 rounded-full bg-[#160b29]/85 p-2 shadow-[0_10px_40px_-5px_rgba(0,0,0,0.9)] ring-1 ring-white/15 backdrop-blur-xl">
+                  <button
+                    type="button"
+                    onClick={() => toggleClip("reverse")}
+                    disabled={locked}
+                    className="flex-1 rounded-full bg-linear-to-r from-fuchsia-500 to-pink-500 py-3.5 text-sm font-bold disabled:opacity-50"
+                  >
+                    {playingDir === "reverse" ? "■ Stopp" : "⏪ Abspielen"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleRecord}
+                    disabled={busy}
+                    aria-label={isRecording ? "Aufnahme stoppen" : "Neu aufnehmen"}
+                    className={`grid size-14 shrink-0 place-items-center rounded-full ring-4 ring-white/10 transition active:scale-90 ${
+                      isRecording ? "animate-pulse bg-rose-600" : "bg-linear-to-br from-rose-500 to-orange-400"
+                    }`}
+                  >
+                    <span className={isRecording ? "size-5 rounded-md bg-white" : "size-5 rounded-full bg-white"} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openShare}
+                    disabled={locked}
+                    className="flex-1 rounded-full bg-white/10 py-3.5 text-sm font-bold ring-1 ring-white/15 disabled:opacity-50"
+                  >
+                    📤 Teilen
+                  </button>
+                </div>
+              </div>
+            </Portal>
+          )}
+
+          {sharing && (
+            <Portal>
+              <ShareSheet clip={clip} effect={effect} rate={rate} onClose={() => setSharing(false)} />
+            </Portal>
+          )}
         </>
       )}
     </div>

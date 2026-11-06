@@ -1,21 +1,24 @@
 # 🔁 Rückwärts-Rekorder
 
-Nimm was auf, hör's dir rückwärts an, hau einen Effekt drauf und schick's deinen Leuten. Gebaut mit Next.js, läuft komplett im Browser.
+Nimm was auf, hör's dir rückwärts an, verzerr deine Stimme und schick's deinen Leuten, per WhatsApp, TikTok, Insta & Co. Gebaut mit Next.js, läuft komplett im Browser und ist fürs Handy optimiert.
 
 **Live:** https://rickykleinhempel.github.io/reverse-voice/
 
 ## Features
 
 - 🎙️ **Aufnehmen & sofort rückwärts hören**: Nach dem Stoppen spielt der Clip automatisch rückwärts ab.
-- 🌈 **Live-Visualizer**: Ein Neon-Ring um den Aufnahme-Knopf reagiert auf Mikro und Wiedergabe.
-- 🤖 **Effekte**: Pur, Echo, Kathedrale, Roboter, Alien, Funkgerät, Krass und 🎲 Zufall.
-- 🐿️ **Tempo & Stimmhöhe**: von 👹 Monster bis 🐿️ Chipmunk, live regelbar.
-- 🔁 **Endlosschleife** und ✂️ **automatisches Wegschneiden von Stille**
-- 💾 **Speichern** als WAV, inklusive Effekt und Tempo
-- 📤 **Teilen** direkt an WhatsApp & Co. (auf Handys mit Web Share API)
-- 🏆 **Rückwärts-Challenge**: die Rückwärts-Version nachmachen. Deine Imitation wird wieder umgedreht und bekommt einen Vibe-Score, ab 65 Punkten mit Konfetti.
+- 🎭 **15 Stimmverzerrer & Effekte**: Helium, Dämon, Roboter, Alien, 8-Bit, Klone, Blubb (Unterwasser), Megafon, Funk, Krass, Echo, Kirche, Geist und Wobble, dazu 🎲 Zufall.
+  Helium, Dämon und Klone ändern die Tonhöhe, ohne das Tempo zu ändern (Pitch-Shifter).
+- ⚡ **Tempo-Regler**: von 👹 Monster bis 🐿️ Chipmunk, live regelbar.
+- 📢 **Extra laut & Freisprechen**: Aufnahmen werden auf volle Lautstärke gebracht, mit Booster und Limiter. Nach der Aufnahme schaltet die Wiedergabe auf den Lautsprecher statt auf die Hörmuschel. Auf dem iPhone ist der Ton auch im Stumm-Modus zu hören.
+- 📤 **Teilen & Speichern**:
+  - **MP3** für WhatsApp, Telegram, Signal, Discord
+  - **WAV** in bester Qualität
+  - **Hochkant-Video (9:16)** mit Visualizer für TikTok, Insta-Story, Snapchat und WhatsApp-Status
+- 🏆 **Rückwärts-Challenge**: die Rückwärts-Version nachmachen und einen Vibe-Score bekommen.
+- 📱 **Mobile first**: App-artige Leiste unten, Safe-Areas für Notch und Home-Bar, kein Doppeltipp-Zoom. Über „Zum Home-Bildschirm“ lässt sich die Seite wie eine App installieren.
 
-🔒 Es wird nichts hochgeladen. Aufnahme und Effekte laufen über MediaRecorder und die Web Audio API lokal im Browser.
+🔒 Es wird nichts hochgeladen. Aufnahme, Effekte und Export laufen lokal im Browser (MediaRecorder, Web Audio API, lamejs).
 
 ## Lokal starten
 
@@ -35,8 +38,10 @@ Jeder Push auf `main` baut die App als statischen Export (`out/`) und veröffent
 | Datei | Inhalt |
 | --- | --- |
 | `src/components/ReverseStudio.tsx` | Haupt-Komponente mit Tabs (Studio / Challenge) |
-| `src/components/Studio.tsx` | Aufnahme, Wiedergabe, Effekte, Export |
+| `src/components/Studio.tsx` | Aufnahme, Wiedergabe, Effekte, mobile Leiste |
+| `src/components/ShareSheet.tsx` | Teilen & Speichern (MP3 / WAV / Video) |
 | `src/components/Challenge.tsx` | Rückwärts-Challenge mit Score |
 | `src/hooks/useRecorder.ts`, `usePlayer.ts` | Mikrofon-Aufnahme bzw. Wiedergabe |
-| `src/lib/audio.ts` | Umkehren, Trimmen, WAV-Export, Wellenform, Score |
-| `src/lib/effects.ts` | Web-Audio-Effektketten und Offline-Rendering |
+| `src/lib/effects.ts` | Effekt-Ketten, Pitch-Shifter, Offline-Rendering |
+| `src/lib/export.ts` | MP3-Encoder, Video-Rendering, Web Share |
+| `src/lib/audio.ts` | AudioContext, Lautsprecher-Routing, Normalisieren, Limiter, WAV, Score |

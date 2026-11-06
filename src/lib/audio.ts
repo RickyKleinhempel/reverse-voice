@@ -4,7 +4,11 @@
  */
 
 let sharedContext: AudioContext | null = null;
-let outputAnalyser: AnalyserNode | null = null;
+let output: { input: GainNode; boost: GainNode; analyser: AnalyserNode } | null = null;
+let loud = true;
+
+/** Verstärkung im „Extra laut“-Modus – der Limiter danach verhindert Übersteuern. */
+export const LOUD_BOOST = 2.2;
 
 /** Ein gemeinsamer AudioContext für die ganze App (im Klick-Handler aufrufen, wegen Autoplay-Regeln). */
 export async function getAudioContext(): Promise<AudioContext> {
@@ -19,15 +23,72 @@ export async function getAudioContext(): Promise<AudioContext> {
   return sharedContext;
 }
 
-/** Analyser vor dem Lautsprecher – füttert den Visualizer während der Wiedergabe. */
-export function getOutputAnalyser(ctx: AudioContext): AnalyserNode {
-  if (!outputAnalyser) {
-    outputAnalyser = ctx.createAnalyser();
-    outputAnalyser.fftSize = 256;
-    outputAnalyser.smoothingTimeConstant = 0.75;
-    outputAnalyser.connect(ctx.destination);
+/**
+ * Nach einer Aufnahme (im Stopp-Tipp aufrufen!): Audio komplett neu starten.
+ * Handys bleiben sonst im „Telefonat“-Modus und spielen leise über den Hörer statt
+ * über den Lautsprecher (Freisprechen).
+ */
+export function restartAudioContext() {
+  const old = sharedContext;
+  sharedContext = null;
+  output = null;
+  void old?.close().catch(() => {});
+  void getAudioContext().catch(() => {});
+}
+
+/** Limiter: macht laut, ohne dass es kratzt. */
+export function createLimiter(ctx: BaseAudioContext): DynamicsCompressorNode {
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -8;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.002;
+  limiter.release.value = 0.2;
+  return limiter;
+}
+
+/** Ausgangskette: Booster → Limiter → Analyser (für den Visualizer) → Lautsprecher. */
+export function getOutput(ctx: AudioContext) {
+  if (!output) {
+    const boost = ctx.createGain();
+    boost.gain.value = loud ? LOUD_BOOST : 1;
+    const limiter = createLimiter(ctx);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.75;
+    boost.connect(limiter);
+    limiter.connect(analyser);
+    analyser.connect(ctx.destination);
+    output = { input: boost, boost, analyser };
   }
-  return outputAnalyser;
+  return output;
+}
+
+export function setLoud(on: boolean) {
+  loud = on;
+  if (output && sharedContext) {
+    output.boost.gain.setTargetAtTime(on ? LOUD_BOOST : 1, sharedContext.currentTime, 0.05);
+  }
+}
+
+export function isLoud() {
+  return loud;
+}
+
+type AudioSessionType = "auto" | "playback" | "play-and-record" | "transient" | "transient-solo" | "ambient";
+
+/**
+ * iPhone/iPad: Ohne das hier ist Web Audio im Stumm-Modus nicht zu hören.
+ * "play-and-record" während der Aufnahme, sonst "playback" (Lautsprecher, auch bei Stumm).
+ */
+export function setAudioSession(type: AudioSessionType) {
+  const session = (navigator as Navigator & { audioSession?: { type: AudioSessionType } }).audioSession;
+  if (!session) return;
+  try {
+    session.type = type;
+  } catch {
+    // nicht unterstützt
+  }
 }
 
 const MIME_CANDIDATES = [
@@ -61,6 +122,25 @@ export function reverseBuffer(buffer: AudioBuffer): AudioBuffer {
     reversed.copyToChannel(data, ch);
   }
   return reversed;
+}
+
+/** Hebt die Aufnahme auf volle Lautstärke an (Spitze bei `target`). */
+export function normalize(buffer: AudioBuffer, target = 0.97): AudioBuffer {
+  let peak = 0;
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+  }
+  if (peak < 0.001 || peak >= target) return buffer;
+  const gain = Math.min(target / peak, 12); // reines Rauschen nicht endlos verstärken
+  const out = emptyLike(buffer, buffer.length);
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    const data = buffer.getChannelData(ch);
+    const scaled = new Float32Array(data.length);
+    for (let i = 0; i < data.length; i++) scaled[i] = data[i] * gain;
+    out.copyToChannel(scaled, ch);
+  }
+  return out;
 }
 
 /** Schneidet Stille am Anfang und Ende ab (relativ zum lautesten Punkt, mit etwas Puffer). */

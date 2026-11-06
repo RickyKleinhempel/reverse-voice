@@ -3,8 +3,9 @@
 import { type CSSProperties, type ReactNode, useMemo, useState } from "react";
 import type { Player } from "@/hooks/usePlayer";
 import type { Recorder } from "@/hooks/useRecorder";
-import { formatTime, reverseBuffer, trimSilence, vibeScore } from "@/lib/audio";
+import { formatTime, normalize, reverseBuffer, trimSilence, vibeScore } from "@/lib/audio";
 import { Confetti } from "./Confetti";
+import { Portal } from "./Portal";
 import { RecordButton } from "./RecordButton";
 import type { Clip } from "./ReverseStudio";
 import { glassButton, primaryButton } from "./ui";
@@ -36,7 +37,7 @@ export function Challenge({ active, recorder, player, clip, trim, onGoToStudio }
   const [attempt, setAttempt] = useState(0);
 
   const result = useMemo(
-    () => (imitation ? reverseBuffer(trim ? trimSilence(imitation) : imitation) : null),
+    () => (imitation ? reverseBuffer(normalize(trim ? trimSilence(imitation) : imitation)) : null),
     [imitation, trim],
   );
   const score = useMemo(
@@ -150,7 +151,11 @@ export function Challenge({ active, recorder, player, clip, trim, onGoToStudio }
               Der Vibe-Score vergleicht nur den Lautstärke-Verlauf – am Ende zählt, was du hörst 😉
             </p>
           </div>
-          {score >= WIN_SCORE && <Confetti key={attempt} />}
+          {score >= WIN_SCORE && (
+            <Portal>
+              <Confetti key={attempt} />
+            </Portal>
+          )}
         </Step>
       )}
     </div>

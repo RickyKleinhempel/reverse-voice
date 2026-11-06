@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buzz, getAudioContext, pickMimeType } from "@/lib/audio";
+import { buzz, getAudioContext, pickMimeType, restartAudioContext, setAudioSession } from "@/lib/audio";
 
 export type RecStatus = "idle" | "requesting" | "recording" | "processing";
 
@@ -41,6 +41,7 @@ export function useRecorder() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     recorderRef.current = null;
+    setAudioSession("playback");
   }, []);
 
   const start = useCallback(
@@ -52,6 +53,7 @@ export function useRecorder() {
       }
 
       try {
+        setAudioSession("play-and-record");
         const ctx = await getAudioContext();
         setStatus("requesting");
 
@@ -84,7 +86,9 @@ export function useRecorder() {
           buzz([15, 40, 15]);
           try {
             const blob = new Blob(chunks, { type: recorder.mimeType || mimeType });
-            const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+            // Kontext wurde beim Stoppen ggf. neu gestartet – daher frisch holen
+            const decodeCtx = await getAudioContext();
+            const decoded = await decodeCtx.decodeAudioData(await blob.arrayBuffer());
             if (decoded.duration < 0.2) throw new Error("zu kurz");
             onDone(decoded);
           } catch {
@@ -118,7 +122,13 @@ export function useRecorder() {
 
   const stop = useCallback(() => {
     const recorder = recorderRef.current;
-    if (recorder && recorder.state !== "inactive") recorder.stop();
+    if (!recorder || recorder.state === "inactive") return;
+    recorder.stop();
+    // Mikro sofort freigeben und Audio neu starten – noch im Tipp, damit der Browser es erlaubt.
+    // So kommt die Wiedergabe danach über den Lautsprecher (Freisprechen) statt leise über den Hörer.
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    setAudioSession("playback");
+    restartAudioContext();
   }, []);
 
   // Beim Verlassen der Seite Mikrofon sicher freigeben.

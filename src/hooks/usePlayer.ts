@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAudioContext, getOutputAnalyser } from "@/lib/audio";
-import { connectEffect, EFFECT_TAIL, type EffectId } from "@/lib/effects";
+import { getAudioContext, getOutput, setAudioSession } from "@/lib/audio";
+import { connectEffect, type EffectId, getEffect, prepareBuffer } from "@/lib/effects";
 
 type PlayOptions = {
   /** Kennung, damit Buttons wissen, ob gerade "ihr" Clip läuft. */
@@ -55,14 +55,16 @@ export function usePlayer() {
   const play = useCallback(
     async ({ id, buffer, effect = "none", rate = 1, loop = false, playhead = null }: PlayOptions) => {
       stop();
+      setAudioSession("playback");
       const ctx = await getAudioContext();
-      const output = getOutputAnalyser(ctx);
+      const output = getOutput(ctx);
+      const prepared = prepareBuffer(buffer, effect);
 
       const source = ctx.createBufferSource();
-      source.buffer = buffer;
+      source.buffer = prepared;
       source.playbackRate.value = rate;
       source.loop = loop;
-      const cleanupEffect = connectEffect(ctx, source, output, effect);
+      const cleanupEffect = connectEffect(ctx, source, output.input, effect);
 
       const current: Current = { id, source, cleanupEffect, playhead, raf: null, rate };
       currentRef.current = current;
@@ -92,13 +94,13 @@ export function usePlayer() {
         setPlayingId(null);
         setAnalyser(null);
         // Hall/Echo ausklingen lassen, dann aufräumen.
-        window.setTimeout(current.cleanupEffect, EFFECT_TAIL[effect] * 1000 + 100);
+        window.setTimeout(current.cleanupEffect, getEffect(effect).tail * 1000 + 100);
       };
 
       source.start();
       current.raf = requestAnimationFrame(tick);
       setPlayingId(id);
-      setAnalyser(output);
+      setAnalyser(output.analyser);
     },
     [stop],
   );

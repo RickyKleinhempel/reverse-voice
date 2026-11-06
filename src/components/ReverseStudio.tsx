@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { usePlayer } from "@/hooks/usePlayer";
 import { useRecorder } from "@/hooks/useRecorder";
-import { reverseBuffer, trimSilence } from "@/lib/audio";
+import { normalize, reverseBuffer, trimSilence } from "@/lib/audio";
 import { Challenge } from "./Challenge";
 import { Studio } from "./Studio";
 
@@ -15,7 +15,7 @@ export type Clip = {
 };
 
 function deriveClip(raw: AudioBuffer, trim: boolean, id: number): Clip {
-  const original = trim ? trimSilence(raw) : raw;
+  const original = normalize(trim ? trimSilence(raw) : raw);
   return { id, raw, original, reversed: reverseBuffer(original) };
 }
 
@@ -58,7 +58,7 @@ export default function ReverseStudio() {
       <div
         role="tablist"
         aria-label="Modus"
-        className="mx-auto mb-6 grid w-full max-w-xs grid-cols-2 gap-1 rounded-full bg-black/30 p-1 ring-1 ring-white/10"
+        className="mx-auto mb-2 grid w-full max-w-xs grid-cols-2 gap-1 rounded-full bg-black/30 p-1 ring-1 ring-white/10"
       >
         {TABS.map((t) => (
           <button

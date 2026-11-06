@@ -18,13 +18,31 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://rickykleinhempel.github.io"),
   title: "Rückwärts-Rekorder 🔁",
   description:
-    "Aufnehmen, rückwärts abspielen, Effekte drauf und die Rückwärts-Challenge zocken – direkt im Browser.",
+    "Aufnehmen, rückwärts abspielen, Stimmverzerrer drauf und per WhatsApp verschicken – direkt im Browser.",
+  applicationName: "Rückwärts-Rekorder",
+  appleWebApp: {
+    capable: true,
+    title: "Rückwärts",
+    statusBarStyle: "black-translucent",
+  },
+  formatDetection: { telephone: false },
+  openGraph: {
+    title: "Rückwärts-Rekorder 🔁",
+    description: "Nimm was auf, hör's dir rückwärts an & schick's deinen Leuten 🤯",
+    type: "website",
+    locale: "de_DE",
+  },
 };
 
 export const viewport: Viewport = {
   themeColor: "#07030f",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

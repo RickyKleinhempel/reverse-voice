@@ -24,11 +24,13 @@ export function Toggle({
   checked,
   onChange,
   disabled,
+  className = "",
   children,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   return (
@@ -38,7 +40,7 @@ export function Toggle({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] px-4 py-3 text-left text-sm font-semibold ring-1 ring-white/10 transition hover:bg-white/[0.08] disabled:opacity-50"
+      className={`flex items-center justify-between gap-3 rounded-2xl bg-white/[0.04] px-4 py-3 text-left text-sm font-semibold ring-1 ring-white/10 transition hover:bg-white/[0.08] disabled:opacity-50 ${className}`}
     >
       <span>{children}</span>
       <span
