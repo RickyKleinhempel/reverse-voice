@@ -159,12 +159,15 @@ export function normalize(buffer: AudioBuffer, target = 0.97): AudioBuffer {
   return out;
 }
 
-/** Schneidet Stille am Anfang und Ende ab (relativ zum lautesten Punkt, mit etwas Puffer). */
-export function trimSilence(buffer: AudioBuffer, padSeconds = 0.08): AudioBuffer {
+/**
+ * Findet den Bereich ohne Stille am Anfang und Ende (relativ zum lautesten Punkt, mit etwas Puffer).
+ * Gibt Sample-Indizes zurück – oder null, wenn es nichts wegzuschneiden gibt.
+ */
+export function findTrimRange(buffer: AudioBuffer, padSeconds = 0.08): { start: number; end: number } | null {
   const data = buffer.getChannelData(0);
   let peak = 0;
   for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
-  if (peak < 0.005) return buffer; // nur Rauschen – nichts anfassen
+  if (peak < 0.005) return null; // nur Rauschen – nichts anfassen
 
   const threshold = peak * 0.06;
   let start = 0;
@@ -175,13 +178,23 @@ export function trimSilence(buffer: AudioBuffer, padSeconds = 0.08): AudioBuffer
   const pad = Math.round(padSeconds * buffer.sampleRate);
   start = Math.max(0, start - pad);
   end = Math.min(data.length, end + pad);
-  if (end - start >= data.length - 1) return buffer;
+  if (end - start >= data.length - 1) return null;
+  return { start, end };
+}
 
-  const trimmed = emptyLike(buffer, end - start);
+/** Ausschnitt eines Buffers (Sample-Indizes) als neuer Buffer. */
+export function sliceBuffer(buffer: AudioBuffer, start: number, end: number): AudioBuffer {
+  const sliced = emptyLike(buffer, end - start);
   for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-    trimmed.copyToChannel(buffer.getChannelData(ch).slice(start, end), ch);
+    sliced.copyToChannel(buffer.getChannelData(ch).slice(start, end), ch);
   }
-  return trimmed;
+  return sliced;
+}
+
+/** Schneidet Stille am Anfang und Ende ab (siehe findTrimRange). */
+export function trimSilence(buffer: AudioBuffer, padSeconds = 0.08): AudioBuffer {
+  const range = findTrimRange(buffer, padSeconds);
+  return range ? sliceBuffer(buffer, range.start, range.end) : buffer;
 }
 
 /** Kodiert einen AudioBuffer als 16-bit-PCM-WAV. */

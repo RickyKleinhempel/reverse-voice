@@ -7,6 +7,7 @@ Nimm was auf, hör's dir rückwärts an, verzerr deine Stimme und schick's deine
 ## Features
 
 - 🎙️ **Aufnehmen & sofort rückwärts hören**: Nach dem Stoppen spielt der Clip automatisch rückwärts ab.
+- 🎥 **Video rückwärts**: Im Studio auf „Video“ umschalten, nach 3 · 2 · 1 mit Selfie- oder Rückkamera filmen (max. 30 s) und Bild & Ton rückwärts ansehen. Effekte, Tempo und Loop funktionieren genauso, der Export wird ein Hochkant-Video mit dem Kamerabild.
 - 🎭 **15 Stimmverzerrer & Effekte**: Helium, Dämon, Roboter, Alien, 8-Bit, Klone, Blubb (Unterwasser), Megafon, Funk, Krass, Echo, Kirche, Geist und Wobble, dazu 🎲 Zufall.
   Helium, Dämon und Klone ändern die Tonhöhe, ohne das Tempo zu ändern (Pitch-Shifter).
 - ⚡ **Tempo-Regler**: von 👹 Monster bis 🐿️ Chipmunk, live regelbar.
@@ -18,7 +19,7 @@ Nimm was auf, hör's dir rückwärts an, verzerr deine Stimme und schick's deine
 - 🏆 **Rückwärts-Challenge**: die Rückwärts-Version nachmachen und einen Vibe-Score bekommen.
 - 📱 **Mobile first**: App-artige Leiste unten, Safe-Areas für Notch und Home-Bar, kein Doppeltipp-Zoom. Über „Zum Home-Bildschirm“ lässt sich die Seite wie eine App installieren.
 
-🔒 Es wird nichts hochgeladen. Aufnahme, Effekte und Export laufen lokal im Browser (MediaRecorder, Web Audio API, lamejs).
+🔒 Es wird nichts hochgeladen. Aufnahme, Effekte und Export laufen lokal im Browser (MediaRecorder, Web Audio API, Canvas, lamejs).
 
 ## Lokal starten
 
@@ -27,7 +28,7 @@ npm install
 npm run dev
 ```
 
-Dann http://localhost:3000 öffnen. Das Mikrofon funktioniert nur über `localhost` oder HTTPS.
+Dann http://localhost:3000 öffnen. Mikrofon und Kamera funktionieren nur über `localhost` oder HTTPS.
 
 ## Deployment
 
@@ -38,10 +39,12 @@ Jeder Push auf `main` baut die App als statischen Export (`out/`) und veröffent
 | Datei | Inhalt |
 | --- | --- |
 | `src/components/ReverseStudio.tsx` | Haupt-Komponente mit Tabs (Studio / Challenge) |
-| `src/components/Studio.tsx` | Aufnahme, Wiedergabe, Effekte, mobile Leiste |
+| `src/components/Studio.tsx` | Aufnahme (Ton/Video), Wiedergabe, Effekte, mobile Leiste |
+| `src/components/VideoStage.tsx` | 9:16-Bühne: Live-Kamera mit Countdown, danach der Clip Bild für Bild |
 | `src/components/ShareSheet.tsx` | Teilen & Speichern (MP3 / WAV / Video) |
 | `src/components/Challenge.tsx` | Rückwärts-Challenge mit Score |
-| `src/hooks/useRecorder.ts`, `usePlayer.ts` | Mikrofon-Aufnahme bzw. Wiedergabe |
+| `src/hooks/useRecorder.ts`, `usePlayer.ts` | Mikrofon-/Kamera-Aufnahme bzw. Wiedergabe |
+| `src/lib/video.ts` | Einzelbilder während der Aufnahme, Bild-Cache, Zeit-Zuordnung fürs Rückwärts-Video |
 | `src/lib/effects.ts` | Effekt-Ketten, Pitch-Shifter, Offline-Rendering |
 | `src/lib/export.ts` | MP3-Encoder, Video-Rendering, Web Share |
 | `src/lib/audio.ts` | AudioContext, Lautsprecher-Routing, Normalisieren, Limiter, WAV, Score |

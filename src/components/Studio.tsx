@@ -1,15 +1,17 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import type { Player } from "@/hooks/usePlayer";
-import { MAX_SECONDS, type Recorder } from "@/hooks/useRecorder";
+import { MAX_SECONDS, MAX_VIDEO_SECONDS, type Recorder } from "@/hooks/useRecorder";
 import { formatTime, isLoud, setLoud } from "@/lib/audio";
 import { EFFECTS, type EffectId } from "@/lib/effects";
+import { type Facing, type VideoFrames, videoTimeAt } from "@/lib/video";
 import { Portal } from "./Portal";
 import { RecordButton } from "./RecordButton";
 import type { Clip } from "./ReverseStudio";
 import { ShareSheet } from "./ShareSheet";
 import { glassButton, primaryButton, Section, Toggle } from "./ui";
+import { VideoStage, type VideoStageHandle } from "./VideoStage";
 import { Waveform } from "./Waveform";
 
 const VIVID = ["#f472b6", "#c084fc", "#22d3ee"] as const;
@@ -31,8 +33,34 @@ const IDEAS = [
   "Sing eine Zeile aus deinem Lieblingssong 🎶",
 ];
 
+const VIDEO_IDEAS = [
+  "Trink einen Schluck Wasser – rückwärts kommt er zurück 🥤",
+  "Gieß Wasser in ein Glas 💧",
+  "Wirf was hoch und fang's wieder 🏀",
+  "Lauf rückwärts aus dem Bild und sag Hallo 👋",
+  "Puste eine Kerze aus 🕯️",
+  "Iss einen Keks 🍪",
+  "Zerknüll ein Blatt Papier 📄",
+  "Setz dich ganz schnell hin 🪑",
+  "Wuschel dir durch die Haare 💇",
+  "Schnips und tu so, als würdest du zaubern ✨",
+];
+
+const MODES = [
+  { id: "audio", label: "🎙️ Ton" },
+  { id: "video", label: "🎥 Video" },
+] as const;
+type Mode = (typeof MODES)[number]["id"];
+
+const subscribeNothing = () => () => {};
+const getIsTouch = () => navigator.maxTouchPoints > 0;
+
 function randomItem<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)];
+}
+
+function limitLabel(seconds: number) {
+  return seconds >= 60 ? `${seconds / 60} Min.` : `${seconds} Sek.`;
 }
 
 function rateLabel(rate: number) {
@@ -50,23 +78,32 @@ type Props = {
   clip: Clip | null;
   trim: boolean;
   onTrimChange: (value: boolean) => void;
-  onRecorded: (raw: AudioBuffer) => Clip;
+  onRecorded: (raw: AudioBuffer, frames?: VideoFrames) => Clip;
 };
 
 export function Studio({ active, recorder, player, clip, trim, onTrimChange, onRecorded }: Props) {
+  const [mode, setMode] = useState<Mode>("audio");
+  const [facing, setFacing] = useState<Facing>("user");
   const [effect, setEffect] = useState<EffectId>("none");
   const [rate, setRate] = useState(1);
   const [loop, setLoop] = useState(false);
   const [loud, setLoudState] = useState(isLoud);
   const [ideaIndex, setIdeaIndex] = useState(0);
   const [sharing, setSharing] = useState(false);
+  const isTouch = useSyncExternalStore(subscribeNothing, getIsTouch, () => false);
 
   const reverseHead = useRef<HTMLDivElement>(null);
   const forwardHead = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<VideoStageHandle>(null);
 
+  const isCountdown = recorder.status === "countdown";
   const isRecording = recorder.status === "recording";
+  const capturing = isCountdown || isRecording;
   const busy = recorder.status === "requesting" || recorder.status === "processing";
-  const locked = isRecording || busy;
+  const locked = capturing || busy;
+  const isVideo = mode === "video";
+  const showStage = isVideo || Boolean(clip?.video);
+  const ideas = isVideo ? VIDEO_IDEAS : IDEAS;
   const playingDir =
     player.playingId === "studio-reverse"
       ? "reverse"
@@ -78,6 +115,8 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
   const playClip = (dir: "reverse" | "forward", overrides: PlayOverrides = {}) => {
     const target = overrides.target ?? clip;
     if (!target) return;
+    const video = target.video;
+    const duration = target.original.duration;
     void player.play({
       id: `studio-${dir}`,
       buffer: dir === "reverse" ? target.reversed : target.original,
@@ -85,17 +124,30 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
       rate: overrides.rate ?? rate,
       loop,
       playhead: dir === "reverse" ? reverseHead.current : forwardHead.current,
+      // Video: zu jeder Ton-Position das passende Bild zeigen.
+      onPosition: video
+        ? (seconds) => stageRef.current?.show(videoTimeAt(video, duration, seconds, dir))
+        : undefined,
     });
   };
 
   const toggleRecord = () => {
-    if (isRecording) {
+    if (capturing) {
       recorder.stop();
       return;
     }
     player.stop();
     // Nach der Aufnahme sofort rückwärts abspielen – das ist der Spaß!
-    void recorder.start((raw) => playClip("reverse", { target: onRecorded(raw) }));
+    void recorder.start(
+      (raw, frames) => playClip("reverse", { target: onRecorded(raw, frames) }),
+      isVideo ? { video: { facing } } : {},
+    );
+  };
+
+  const changeMode = (next: Mode) => {
+    setMode(next);
+    setIdeaIndex(0);
+    recorder.clearError();
   };
 
   const toggleClip = (dir: "reverse" | "forward") => {
@@ -137,28 +189,77 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
     setSharing(true);
   };
 
-  let status = "Tipp auf den Knopf & leg los!";
-  if (recorder.status === "requesting") status = "Erlaube den Mikro-Zugriff … 🎙️";
-  else if (isRecording) status = `Aufnahme läuft – tippen zum Stoppen (max. ${MAX_SECONDS / 60} Min.)`;
-  else if (recorder.status === "processing") status = "Wird umgedreht … 🔄";
+  let status = isVideo ? "Tipp auf den Knopf – nach 3 · 2 · 1 läuft die Kamera!" : "Tipp auf den Knopf & leg los!";
+  if (recorder.status === "requesting") status = isVideo ? "Erlaube Kamera & Mikro … 🎥" : "Erlaube den Mikro-Zugriff … 🎙️";
+  else if (isCountdown) status = "Gleich geht's los … (tippen zum Abbrechen)";
+  else if (isRecording)
+    status = `Aufnahme läuft – tippen zum Stoppen (max. ${limitLabel(isVideo ? MAX_VIDEO_SECONDS : MAX_SECONDS)})`;
+  else if (recorder.status === "processing") status = isVideo ? "Video wird umgedreht … 🔄" : "Wird umgedreht … 🔄";
   else if (clip) status = "Neuer Versuch? Einfach nochmal tippen.";
+
+  const shownTime = isCountdown ? 0 : isRecording ? recorder.elapsed : (clip?.original.duration ?? 0);
 
   return (
     <div className="flex flex-col gap-6">
+      <div className="flex flex-col items-center gap-3">
+        <div
+          role="radiogroup"
+          aria-label="Aufnahme-Art"
+          className="grid w-full max-w-[15rem] grid-cols-2 gap-1 rounded-full bg-black/30 p-1 ring-1 ring-white/10"
+        >
+          {MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="radio"
+              aria-checked={mode === m.id}
+              disabled={locked}
+              onClick={() => changeMode(m.id)}
+              className={`rounded-full py-1.5 text-sm font-bold transition disabled:opacity-40 ${
+                mode === m.id ? "bg-white/15 text-white ring-1 ring-white/20" : "text-white/55 hover:text-white"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        {isVideo && isTouch && (
+          <button
+            type="button"
+            onClick={() => setFacing((f) => (f === "user" ? "environment" : "user"))}
+            disabled={locked}
+            className="rounded-full bg-white/[0.06] px-4 py-1.5 text-xs font-semibold ring-1 ring-white/15 transition hover:bg-white/[0.12] disabled:opacity-50"
+          >
+            {facing === "user" ? "🤳 Selfie-Kamera" : "📷 Rückkamera"} <span className="text-white/50">· wechseln</span>
+          </button>
+        )}
+      </div>
+
       <div className="flex flex-col items-center">
+        {showStage && (
+          <VideoStage
+            ref={stageRef}
+            live={recorder.preview}
+            video={clip?.video}
+            posterTime={clip?.video ? videoTimeAt(clip.video, clip.original.duration, 0, "reverse") : 0}
+            countdown={isCountdown ? recorder.countdown : null}
+            recording={isRecording}
+          />
+        )}
         <RecordButton
-          recording={isRecording}
+          size={showStage ? "md" : "lg"}
+          recording={capturing}
           busy={busy}
-          analyser={active ? (isRecording ? recorder.analyser : player.analyser) : null}
+          analyser={active ? (capturing ? recorder.analyser : player.analyser) : null}
           onClick={toggleRecord}
-          label={isRecording ? "Aufnahme stoppen" : "Aufnahme starten"}
+          label={isCountdown ? "Countdown abbrechen" : isRecording ? "Aufnahme stoppen" : "Aufnahme starten"}
         />
-        <div className="-mt-4 text-center" aria-live="polite">
+        <div className={`${showStage ? "-mt-2" : "-mt-4"} text-center`} aria-live="polite">
           <p className="font-mono text-4xl font-semibold tabular-nums">
             {isRecording && (
               <span className="mr-2 inline-block size-3 animate-pulse rounded-full bg-rose-500 align-middle" />
             )}
-            {formatTime(isRecording ? recorder.elapsed : (clip?.original.duration ?? 0))}
+            {formatTime(shownTime)}
           </p>
           <p className="mt-1 text-sm text-white/60">{status}</p>
         </div>
@@ -166,11 +267,11 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
 
       {!clip && !locked && (
         <div className="rounded-3xl bg-linear-to-br from-violet-500/15 to-cyan-400/10 p-5 text-center ring-1 ring-white/10">
-          <p className="text-sm text-white/60">💡 Keine Idee? Sag mal:</p>
-          <p className="mt-1 font-display text-xl font-bold">„{IDEAS[ideaIndex]}“</p>
+          <p className="text-sm text-white/60">💡 Keine Idee? {isVideo ? "Probier mal:" : "Sag mal:"}</p>
+          <p className="mt-1 font-display text-xl font-bold">„{ideas[ideaIndex % ideas.length]}“</p>
           <button
             type="button"
-            onClick={() => setIdeaIndex(randomItem(IDEAS.map((_, i) => i).filter((i) => i !== ideaIndex)))}
+            onClick={() => setIdeaIndex(randomItem(ideas.map((_, i) => i).filter((i) => i !== ideaIndex)))}
             className="mt-3 rounded-full bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/20"
           >
             🎲 Andere Idee
@@ -304,12 +405,12 @@ export function Studio({ active, recorder, player, clip, trim, onTrimChange, onR
                     type="button"
                     onClick={toggleRecord}
                     disabled={busy}
-                    aria-label={isRecording ? "Aufnahme stoppen" : "Neu aufnehmen"}
+                    aria-label={capturing ? "Aufnahme stoppen" : "Neu aufnehmen"}
                     className={`grid size-14 shrink-0 place-items-center rounded-full ring-4 ring-white/10 transition active:scale-90 ${
-                      isRecording ? "animate-pulse bg-rose-600" : "bg-linear-to-br from-rose-500 to-orange-400"
+                      capturing ? "animate-pulse bg-rose-600" : "bg-linear-to-br from-rose-500 to-orange-400"
                     }`}
                   >
-                    <span className={isRecording ? "size-5 rounded-md bg-white" : "size-5 rounded-full bg-white"} />
+                    <span className={capturing ? "size-5 rounded-md bg-white" : "size-5 rounded-full bg-white"} />
                   </button>
                   <button
                     type="button"

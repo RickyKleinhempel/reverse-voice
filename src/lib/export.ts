@@ -4,6 +4,7 @@
  */
 import { Mp3Encoder } from "@breezystack/lamejs";
 import { audioBufferToWav, getAudioContext, setAudioSession } from "./audio";
+import { type ClipVideo, createFrameCache, drawCover, frameIndexAt, videoTimeAt } from "./video";
 
 export type ExportFile = { blob: Blob; name: string; type: string };
 
@@ -75,6 +76,8 @@ type VideoOptions = {
   rate: number;
   displayFont: string;
   bodyFont: string;
+  /** Video-Clip: Kamerabilder rückwärts als Hintergrund statt Visualizer. */
+  video?: { clip: ClipVideo; duration: number };
   onProgress?: (progress: number) => void;
 };
 
@@ -141,12 +144,54 @@ export async function renderVideo(opts: VideoOptions): Promise<ExportFile> {
   const duration = opts.audio.duration;
   let startAt = Number.POSITIVE_INFINITY;
 
-  const draw = () => {
-    const now = ctx.currentTime;
-    const t = now;
-    const progress = Math.min(1, Math.max(0, (now - startAt) / duration));
-    analyser.getByteFrequencyData(freq);
+  // Video-Clip: Kamerabilder vorbereiten. Das aktuelle Bild liegt in einem eigenen Canvas,
+  // damit es stehen bleibt, falls das nächste noch dekodiert wird.
+  const camera = opts.video;
+  const frameCache = camera ? createFrameCache(camera.clip.frames, 24) : null;
+  const frameCanvas = camera ? document.createElement("canvas") : null;
+  const frameG = frameCanvas?.getContext("2d") ?? null;
+  let shownFrame = -1;
+  if (camera && frameCanvas && frameCache) {
+    frameCanvas.width = camera.clip.frames.width;
+    frameCanvas.height = camera.clip.frames.height;
+    const first = frameIndexAt(camera.clip.frames, videoTimeAt(camera.clip, camera.duration, 0, "reverse"));
+    await Promise.all(Array.from({ length: 10 }, (_, k) => frameCache.load(first - k)));
+  }
 
+  const drawCamera = (now: number) => {
+    if (!camera || !frameCanvas || !frameG || !frameCache) return;
+    // Position im Ton (vor dem Tempo) → Bild. Beim Nachhall bleibt das letzte Bild stehen.
+    const position = Math.max(0, now - startAt) * opts.rate;
+    const index = frameIndexAt(camera.clip.frames, videoTimeAt(camera.clip, camera.duration, position, "reverse"));
+    frameCache.prefetch(index, -1, 6);
+    if (index !== shownFrame) {
+      const bitmap = frameCache.get(index);
+      if (bitmap) {
+        try {
+          frameG.drawImage(bitmap, 0, 0, frameCanvas.width, frameCanvas.height);
+          shownFrame = index;
+        } catch {
+          // schon freigegeben – nächstes Mal
+        }
+      }
+    }
+    g.fillStyle = "#07030f";
+    g.fillRect(0, 0, W, H);
+    if (shownFrame >= 0) drawCover(g, frameCanvas, frameCanvas.width, frameCanvas.height, W, H);
+    // Abdunkeln oben und unten, damit die Schrift lesbar bleibt.
+    const top = g.createLinearGradient(0, 0, 0, 340);
+    top.addColorStop(0, "rgba(7,3,15,0.85)");
+    top.addColorStop(1, "rgba(7,3,15,0)");
+    g.fillStyle = top;
+    g.fillRect(0, 0, W, 340);
+    const bottom = g.createLinearGradient(0, H - 420, 0, H);
+    bottom.addColorStop(0, "rgba(7,3,15,0)");
+    bottom.addColorStop(1, "rgba(7,3,15,0.9)");
+    g.fillStyle = bottom;
+    g.fillRect(0, H - 420, W, 420);
+  };
+
+  const drawVisualizer = (t: number) => {
     // Hintergrund mit wandernden Farbblasen
     g.fillStyle = "#07030f";
     g.fillRect(0, 0, W, H);
@@ -162,20 +207,6 @@ export async function renderVideo(opts: VideoOptions): Promise<ExportFile> {
       g.fillStyle = grad;
       g.fillRect(0, 0, W, H);
     }
-
-    // Titel
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    g.fillStyle = "rgba(255,255,255,0.8)";
-    g.font = `700 26px ${opts.bodyFont}`;
-    g.fillText("🔊  RÜCKWÄRTS  ABGESPIELT", W / 2, 150);
-    const titleGrad = g.createLinearGradient(120, 0, W - 120, 0);
-    titleGrad.addColorStop(0, "#e879f9");
-    titleGrad.addColorStop(0.5, "#f9a8d4");
-    titleGrad.addColorStop(1, "#67e8f9");
-    g.fillStyle = titleGrad;
-    g.font = `800 58px ${opts.displayFont}`;
-    g.fillText("Verstehst du's?", W / 2, 240);
 
     // Visualizer-Ring mit Effekt-Emoji in der Mitte
     const cx = W / 2;
@@ -206,19 +237,45 @@ export async function renderVideo(opts: VideoOptions): Promise<ExportFile> {
     g.arc(cx, cy, 128, 0, Math.PI * 2);
     g.fill();
     const pulse = 1 + (freq[4] / 255) * 0.12;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
     g.font = `${Math.round(120 * pulse)}px sans-serif`;
     g.fillText(opts.emoji, cx, cy + 8);
+  };
+
+  const draw = () => {
+    const now = ctx.currentTime;
+    const progress = Math.min(1, Math.max(0, (now - startAt) / duration));
+    analyser.getByteFrequencyData(freq);
+
+    if (camera) drawCamera(now);
+    else drawVisualizer(now);
+
+    // Titel
+    const titleY = camera ? 200 : 240;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillStyle = "rgba(255,255,255,0.8)";
+    g.font = `700 26px ${opts.bodyFont}`;
+    g.fillText(camera ? "⏪  RÜCKWÄRTS  ABGESPIELT" : "🔊  RÜCKWÄRTS  ABGESPIELT", W / 2, titleY - 90);
+    const titleGrad = g.createLinearGradient(120, 0, W - 120, 0);
+    titleGrad.addColorStop(0, "#e879f9");
+    titleGrad.addColorStop(0.5, "#f9a8d4");
+    titleGrad.addColorStop(1, "#67e8f9");
+    g.fillStyle = titleGrad;
+    g.font = `800 58px ${opts.displayFont}`;
+    g.fillText(camera ? "Zurückgespult! 🤯" : "Verstehst du's?", W / 2, titleY);
 
     // Wellenform mit Fortschritt
-    const waveTop = 960;
-    const waveH = 120;
+    const waveTop = camera ? 1010 : 960;
+    const waveH = camera ? 90 : 120;
     const barW = 6;
     const gap = (W - 120 - peaks.length * barW) / (peaks.length - 1);
     peaks.forEach((p, i) => {
       const x = 60 + i * (barW + gap);
       const h = Math.max(6, p * waveH);
       const played = i / peaks.length <= progress;
-      g.fillStyle = played ? `hsl(${320 - (i / peaks.length) * 140} 95% 66%)` : "rgba(255,255,255,0.18)";
+      g.fillStyle = played ? `hsl(${320 - (i / peaks.length) * 140} 95% 66%)` : "rgba(255,255,255,0.25)";
       g.beginPath();
       if (typeof g.roundRect === "function") g.roundRect(x, waveTop + (waveH - h) / 2, barW, h, 3);
       else g.rect(x, waveTop + (waveH - h) / 2, barW, h);
@@ -248,11 +305,15 @@ export async function renderVideo(opts: VideoOptions): Promise<ExportFile> {
       stream.getTracks().forEach((track) => track.stop());
       source.disconnect();
       analyser.disconnect();
+      frameCache?.dispose();
       const mime = recorder.mimeType || type;
       const ext = mime.includes("mp4") ? "mp4" : "webm";
       resolve({ blob: new Blob(chunks, { type: mime.split(";")[0] }), name: `rueckwaerts.${ext}`, type: mime.split(";")[0] });
     };
-    recorder.onerror = () => reject(new Error("Videoaufnahme fehlgeschlagen."));
+    recorder.onerror = () => {
+      frameCache?.dispose();
+      reject(new Error("Videoaufnahme fehlgeschlagen."));
+    };
 
     draw();
     recorder.start(250);

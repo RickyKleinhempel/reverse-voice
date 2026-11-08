@@ -13,6 +13,8 @@ type PlayOptions = {
   loop?: boolean;
   /** Element, das als Abspiel-Marker über die Wellenform wandert. */
   playhead?: HTMLElement | null;
+  /** Wird pro Bild mit der aktuellen Position im Buffer (Sekunden) aufgerufen – z. B. fürs Video. */
+  onPosition?: (seconds: number) => void;
 };
 
 type Current = {
@@ -53,7 +55,7 @@ export function usePlayer() {
   }, []);
 
   const play = useCallback(
-    async ({ id, buffer, effect = "none", rate = 1, loop = false, playhead = null }: PlayOptions) => {
+    async ({ id, buffer, effect = "none", rate = 1, loop = false, playhead = null, onPosition }: PlayOptions) => {
       stop();
       setAudioSession("playback");
       const ctx = await getAudioContext();
@@ -76,9 +78,9 @@ export function usePlayer() {
         const now = ctx.currentTime;
         position += (now - last) * current.rate;
         last = now;
-        const progress = source.loop
-          ? (position % buffer.duration) / buffer.duration
-          : Math.min(1, position / buffer.duration);
+        const seconds = source.loop ? position % buffer.duration : Math.min(position, buffer.duration);
+        const progress = seconds / buffer.duration;
+        onPosition?.(seconds);
         if (playhead) {
           playhead.style.opacity = "1";
           playhead.style.left = `${progress * 100}%`;

@@ -47,9 +47,11 @@ type Props = {
 
 export function ShareSheet({ clip, effect, rate, onClose }: Props) {
   const fx = getEffect(effect);
-  const [format, setFormat] = useState<Format>("mp3");
+  // Video-Clip → gleich das Video anbieten; sonst MP3 sofort vorbereiten.
+  const [videoFirst] = useState(() => Boolean(clip.video && getVideoType()));
+  const [format, setFormat] = useState<Format>(videoFirst ? "video" : "mp3");
   const [files, setFiles] = useState<Partial<Record<Format, File>>>({});
-  const [working, setWorking] = useState<Format | null>("mp3");
+  const [working, setWorking] = useState<Format | null>(videoFirst ? null : "mp3");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -82,6 +84,7 @@ export function ShareSheet({ clip, effect, rate, onClose }: Props) {
       rate,
       displayFont: display,
       bodyFont: body,
+      video: clip.video && { clip: clip.video, duration: clip.original.duration },
       onProgress: setProgress,
     });
     return new File([video.blob], `${baseName}.${video.name.split(".").pop()}`, { type: video.type });
@@ -104,6 +107,7 @@ export function ShareSheet({ clip, effect, rate, onClose }: Props) {
 
   // MP3 gleich beim Öffnen vorbereiten – dann geht das Teilen sofort.
   useEffect(() => {
+    if (videoFirst) return;
     let cancelled = false;
     (async () => {
       try {
@@ -143,7 +147,7 @@ export function ShareSheet({ clip, effect, rate, onClose }: Props) {
   const chooseFormat = (fmt: Format) => {
     setFormat(fmt);
     setNotice(null);
-    if (fmt === "wav") void prepare("wav");
+    if (fmt === "wav" || fmt === "mp3") void prepare(fmt);
   };
 
   const share = async (file: File) => {
@@ -163,6 +167,12 @@ export function ShareSheet({ clip, effect, rate, onClose }: Props) {
 
   const formats = FORMATS.filter((f) => f.id !== "video" || videoType);
   const current = FORMATS.find((f) => f.id === format) ?? FORMATS[0];
+  const hint =
+    clip.video && format === "video"
+      ? "Dein Clip rückwärts als Hochkant-Video, mit Effekt-Sound. Für TikTok, Insta-Story, Snapchat & WhatsApp-Status."
+      : clip.video && format !== "video"
+        ? `${current.hint} (nur der Ton)`
+        : current.hint;
   const file = files[format];
   const shareable = file ? canShareFile(file) : false;
   const size = file
@@ -227,7 +237,7 @@ export function ShareSheet({ clip, effect, rate, onClose }: Props) {
             </button>
           ))}
         </div>
-        <p className="mt-3 min-h-10 text-sm text-white/60">{current.hint}</p>
+        <p className="mt-3 min-h-10 text-sm text-white/60">{hint}</p>
 
         <div className="mt-4 flex flex-col gap-3">
           {working === format ? (

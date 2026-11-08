@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import { usePlayer } from "@/hooks/usePlayer";
 import { useRecorder } from "@/hooks/useRecorder";
-import { normalize, reverseBuffer, trimSilence } from "@/lib/audio";
+import { findTrimRange, normalize, reverseBuffer, sliceBuffer } from "@/lib/audio";
+import type { ClipVideo, VideoFrames } from "@/lib/video";
 import { Challenge } from "./Challenge";
 import { Studio } from "./Studio";
 
@@ -12,11 +13,16 @@ export type Clip = {
   raw: AudioBuffer;
   original: AudioBuffer;
   reversed: AudioBuffer;
+  /** Nur bei Video-Aufnahmen: Einzelbilder, passend zum Ton. */
+  video?: ClipVideo;
 };
 
-function deriveClip(raw: AudioBuffer, trim: boolean, id: number): Clip {
-  const original = normalize(trim ? trimSilence(raw) : raw);
-  return { id, raw, original, reversed: reverseBuffer(original) };
+function deriveClip(raw: AudioBuffer, trim: boolean, id: number, frames?: VideoFrames): Clip {
+  const range = trim ? findTrimRange(raw) : null;
+  const original = normalize(range ? sliceBuffer(raw, range.start, range.end) : raw);
+  // Wird vorne Stille weggeschnitten, müssen die Bilder um genauso viel verschoben werden.
+  const video = frames && { frames, start: range ? range.start / raw.sampleRate : 0 };
+  return { id, raw, original, reversed: reverseBuffer(original), video };
 }
 
 const TABS = [
@@ -41,8 +47,8 @@ export default function ReverseStudio() {
     setTab(next);
   };
 
-  const handleRecorded = (raw: AudioBuffer) => {
-    const next = deriveClip(raw, trim, nextId.current++);
+  const handleRecorded = (raw: AudioBuffer, frames?: VideoFrames) => {
+    const next = deriveClip(raw, trim, nextId.current++, frames);
     setClip(next);
     return next;
   };
@@ -50,7 +56,7 @@ export default function ReverseStudio() {
   const handleTrimChange = (value: boolean) => {
     player.stop();
     setTrim(value);
-    setClip((current) => current && deriveClip(current.raw, value, current.id));
+    setClip((current) => current && deriveClip(current.raw, value, current.id, current.video?.frames));
   };
 
   return (
